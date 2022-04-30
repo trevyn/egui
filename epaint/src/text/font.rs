@@ -1,6 +1,6 @@
 use crate::{
     mutex::{Mutex, RwLock},
-    TextureAtlas,
+    ColorImage, ImageData, TextureAtlas,
 };
 use ahash::AHashMap;
 use emath::{vec2, Vec2};
@@ -174,7 +174,7 @@ impl FontImpl {
             let glyph_info = allocate_glyph(
                 &mut self.atlas.lock(),
                 &self.ab_glyph_font,
-                glyph_id,
+                c,
                 self.scale_in_pixels as f32,
                 self.y_offset,
                 self.pixels_per_point,
@@ -355,32 +355,82 @@ fn invisible_char(c: char) -> bool {
 fn allocate_glyph(
     atlas: &mut TextureAtlas,
     font: &ab_glyph::FontArc,
-    glyph_id: ab_glyph::GlyphId,
+    c: char,
     scale_in_pixels: f32,
     y_offset: f32,
     pixels_per_point: f32,
 ) -> GlyphInfo {
-    assert!(glyph_id.0 != 0);
     use ab_glyph::{Font as _, ScaleFont};
+
+    let glyph_id = font.glyph_id(c);
+    assert!(glyph_id.0 != 0);
 
     let glyph =
         glyph_id.with_scale_and_position(scale_in_pixels, ab_glyph::Point { x: 0.0, y: 0.0 });
 
     let uv_rect = font.outline_glyph(glyph).map(|glyph| {
         let bb = glyph.px_bounds();
-        let glyph_width = bb.width() as usize;
-        let glyph_height = bb.height() as usize;
+        let glyph_width = 23; //bb.width() as usize;
+        let glyph_height = 23; //bb.height() as usize;
         if glyph_width == 0 || glyph_height == 0 {
             UvRect::default()
         } else {
             let (glyph_pos, image) = atlas.allocate((glyph_width, glyph_height));
-            glyph.draw(|x, y, v| {
-                if v > 0.0 {
-                    let px = glyph_pos.0 + x as usize;
-                    let py = glyph_pos.1 + y as usize;
-                    image[(px, py)] = v;
+
+            match image {
+                ImageData::Font(image) => {
+                    glyph.draw(|x, y, v| {
+                        if v > 0.0 {
+                            let px = glyph_pos.0 + x as usize;
+                            let py = glyph_pos.1 + y as usize;
+                            image[(px, py)] = v;
+                        }
+                    });
                 }
-            });
+                ImageData::Color(image) => {
+                    use wasm_bindgen::JsCast;
+
+                    let document = web_sys::window().unwrap().document().unwrap();
+                    let canvas = document.create_element("canvas").unwrap();
+                    let canvas: web_sys::HtmlCanvasElement =
+                        canvas.dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+
+                    canvas.set_width(23);
+                    canvas.set_height(23);
+
+                    let context = canvas
+                        .get_context("2d")
+                        .unwrap()
+                        .unwrap()
+                        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+                        .unwrap();
+
+                    context.set_font("30px system-ui");
+
+                    context.set_fill_style(&"white".into());
+
+                    context
+                        .fill_text(c.to_string().as_str(), 0.0, 20.0)
+                        .unwrap();
+
+                    let data_url = canvas.to_data_url_with_type("image/png").unwrap();
+                    let data = data_url.strip_prefix("data:image/png;base64,").unwrap();
+                    let image_bytes = base64::decode(data).unwrap();
+                    let loaded_image = image::load_from_memory(&image_bytes).unwrap();
+                    let glyph_image = ColorImage::from_rgba_unmultiplied(
+                        [loaded_image.width() as _, loaded_image.height() as _],
+                        loaded_image.to_rgba8().as_flat_samples().as_slice(),
+                    );
+
+                    for y in 0..23 {
+                        for x in 0..23 {
+                            let px = glyph_pos.0 + x as usize;
+                            let py = glyph_pos.1 + y as usize;
+                            image[(px, py)] = glyph_image[(x, y)];
+                        }
+                    }
+                }
+            }
 
             let offset_in_pixels = vec2(bb.min.x as f32, scale_in_pixels + bb.min.y as f32);
             let offset = offset_in_pixels / pixels_per_point + y_offset * Vec2::Y;

@@ -24,6 +24,27 @@ impl ImageData {
         }
     }
 
+    pub fn pixels_len(&self) -> usize {
+        match self {
+            Self::Color(image) => image.pixels.len(),
+            Self::Font(image) => image.pixels.len(),
+        }
+    }
+
+    pub fn pixels_resize(&mut self, new_len: usize) {
+        match self {
+            Self::Color(image) => image.pixels.resize(new_len, Color32::TRANSPARENT),
+            Self::Font(image) => image.pixels.resize(new_len, 0.0),
+        }
+    }
+
+    pub fn region(&self, [x, y]: [usize; 2], [w, h]: [usize; 2]) -> ImageData {
+        match self {
+            Self::Color(image) => ImageData::Color(image.region([x, y], [w, h])),
+            Self::Font(image) => ImageData::Font(image.region([x, y], [w, h])),
+        }
+    }
+
     pub fn width(&self) -> usize {
         self.size()[0]
     }
@@ -124,6 +145,23 @@ impl ColorImage {
     #[inline]
     pub fn height(&self) -> usize {
         self.size[1]
+    }
+
+    /// Clone a sub-region as a new image.
+    pub fn region(&self, [x, y]: [usize; 2], [w, h]: [usize; 2]) -> ColorImage {
+        assert!(x + w <= self.width());
+        assert!(y + h <= self.height());
+
+        let mut pixels = Vec::with_capacity(w * h);
+        for y in y..y + h {
+            let offset = y * self.width() + x;
+            pixels.extend(&self.pixels[offset..(offset + w)]);
+        }
+        assert_eq!(pixels.len(), w * h);
+        ColorImage {
+            size: [w, h],
+            pixels,
+        }
     }
 }
 

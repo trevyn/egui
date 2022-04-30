@@ -36,7 +36,7 @@ syntax_highlighting = ["egui_demo_lib/syntax_highlighting"]
 [dependencies]
 chrono = { version = "0.4", features = ["js-sys", "wasmbind"] }
 eframe = { version = "0.17.0", path = "../eframe" }
-egui = { version = "0.17.0", path = "../egui", features = ["extra_debug_asserts"] }
+egui = { version = "0.17.0", path = "../egui", features = ["extra_debug_asserts", "native_fonts"] }
 egui_demo_lib = { version = "0.17.0", path = "../egui_demo_lib", features = ["chrono"] }
 egui_glow = { version = "0.17.0", path = "../egui_glow" }
 

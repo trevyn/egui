@@ -41,8 +41,11 @@ extra_debug_asserts = ["emath/extra_debug_asserts"]
 # Always enable additional checks.
 extra_asserts = ["emath/extra_asserts"]
 
-# Add compatability with https://github.com/kvark/mint
+# Add compatibility with https://github.com/kvark/mint
 mint = ["emath/mint"]
+
+# Allow using native fonts (currently web-only)
+native_fonts = ["base64", "image", "wasm-bindgen", "web-sys"]
 
 # implement serde on most types.
 serde = ["dep:serde", "ahash/serde", "emath/serde"]
@@ -59,6 +62,17 @@ ahash = { version = "0.7", default-features = false, features = ["std"] }
 bytemuck = { version = "1.7.2", optional = true, features = ["derive"] }
 cint = { version = "^0.2.2", optional = true }
 serde = { version = "1", optional = true, features = ["derive", "rc"] }
+
+base64 = { version = "0.13", optional = true }
+image = { version = "0.24", optional = true, default-features = false, features = ["png"] }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3.52", optional = true, features = [
+  "CanvasRenderingContext2d",
+  "Document",
+  "Element",
+  "HtmlCanvasElement",
+  "Window",
+] }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

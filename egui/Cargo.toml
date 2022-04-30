@@ -37,8 +37,11 @@ extra_debug_asserts = ["epaint/extra_debug_asserts"]
 # Always enable additional checks.
 extra_asserts = ["epaint/extra_asserts"]
 
-# Add compatability with https://github.com/kvark/mint
+# Add compatibility with https://github.com/kvark/mint
 mint = ["epaint/mint"]
+
+# Allow using native fonts (currently web-only)
+native_fonts = ["epaint/native_fonts"]
 
 # enable persistence of memory (window positions etc).
 persistence = ["serde", "epaint/serde", "ron"]

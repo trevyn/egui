@@ -26,9 +26,9 @@ pub mod textures;
 pub mod util;
 
 pub use {
+    crate::image::{ColorImage, FontImage, ImageData, ImageDelta},
     bezier::{CubicBezierShape, QuadraticBezierShape},
     color::{Color32, Rgba},
-    image::{ColorImage, FontImage, ImageData, ImageDelta},
     mesh::{Mesh, Mesh16, Vertex},
     shadow::Shadow,
     shape::{

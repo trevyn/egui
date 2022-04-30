@@ -7,7 +7,7 @@ use crate::{
         font::{Font, FontImpl},
         Galley, LayoutJob,
     },
-    TextureAtlas,
+    Color32, ImageData, TextureAtlas,
 };
 use emath::NumExt as _;
 
@@ -541,7 +541,10 @@ impl FontsImpl {
             // Make the top left pixel fully white:
             let (pos, image) = atlas.allocate((1, 1));
             assert_eq!(pos, (0, 0));
-            image[pos] = 1.0;
+            match image {
+                ImageData::Font(image) => image[pos] = 1.0,
+                ImageData::Color(image) => image[pos] = Color32::WHITE,
+            }
         }
 
         let atlas = Arc::new(Mutex::new(atlas));
