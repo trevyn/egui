@@ -53,6 +53,13 @@ impl ImageData {
         self.size()[1]
     }
 
+    pub fn set_height(&mut self, height: usize) {
+        match self {
+            Self::Color(image) => image.size[1] = height,
+            Self::Font(image) => image.size[1] = height,
+        }
+    }
+
     pub fn bytes_per_pixel(&self) -> usize {
         match self {
             Self::Color(_) | Self::Font(_) => 4,

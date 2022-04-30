@@ -141,7 +141,7 @@ impl TextureAtlas {
 
 fn resize_to_min_height(image: &mut ImageData, required_height: usize) -> bool {
     while required_height >= image.height() {
-        image.size()[1] *= 2; // double the height
+        image.set_height(image.height() * 2); // double the height
     }
 
     if image.width() * image.height() > image.pixels_len() {

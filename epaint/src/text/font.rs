@@ -171,7 +171,7 @@ impl FontImpl {
                 None // unsupported character
             }
         } else {
-            let glyph_info = allocate_glyph(
+            let glyph_info = allocate_native_glyph(
                 &mut self.atlas.lock(),
                 &self.ab_glyph_font,
                 c,
@@ -449,6 +449,118 @@ fn allocate_glyph(
 
     let advance_width_in_points =
         font.as_scaled(scale_in_pixels).h_advance(glyph_id) / pixels_per_point;
+
+    GlyphInfo {
+        id: glyph_id,
+        advance_width: advance_width_in_points,
+        uv_rect,
+    }
+}
+
+fn allocate_native_glyph(
+    atlas: &mut TextureAtlas,
+    font: &ab_glyph::FontArc,
+    c: char,
+    scale_in_pixels: f32,
+    y_offset: f32,
+    pixels_per_point: f32,
+) -> GlyphInfo {
+    use ab_glyph::{Font as _, ScaleFont};
+    use wasm_bindgen::JsCast;
+
+    let document = web_sys::window().unwrap().document().unwrap();
+    let canvas = document.create_element("canvas").unwrap();
+    let canvas: web_sys::HtmlCanvasElement =
+        canvas.dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+
+    let context = canvas
+        .get_context("2d")
+        .unwrap()
+        .unwrap()
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .unwrap();
+
+    context.set_font(format!("{}px system-ui", scale_in_pixels).as_str());
+
+    let metrics = context.measure_text(c.to_string().as_str()).unwrap();
+
+    let glyph_width =
+        (metrics.actual_bounding_box_left() + metrics.actual_bounding_box_right() + 1.0).ceil()
+            as usize;
+    let glyph_height = (metrics.actual_bounding_box_ascent().abs()
+        + metrics.actual_bounding_box_descent().abs()
+        + 1.0)
+        .ceil() as usize;
+
+    canvas.set_width(glyph_width as u32);
+    canvas.set_height(glyph_height as u32);
+
+    let context = canvas
+        .get_context("2d")
+        .unwrap()
+        .unwrap()
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .unwrap();
+
+    context.set_font(format!("{}px system-ui", scale_in_pixels).as_str());
+    context.set_fill_style(&"white".into());
+
+    let glyph_id = font.glyph_id(c);
+    assert!(glyph_id.0 != 0);
+
+    let uv_rect = if glyph_width == 0 || glyph_height == 0 {
+        UvRect::default()
+    } else {
+        let (glyph_pos, image) = atlas.allocate((glyph_width, glyph_height));
+
+        match image {
+            ImageData::Font(_image) => {}
+            ImageData::Color(image) => {
+                context
+                    .fill_text(
+                        c.to_string().as_str(),
+                        0.0,
+                        metrics.actual_bounding_box_ascent() + 1.0,
+                    )
+                    .unwrap();
+
+                let data_url = canvas.to_data_url_with_type("image/png").unwrap();
+                let data = data_url.strip_prefix("data:image/png;base64,").unwrap();
+                let image_bytes = base64::decode(data).unwrap();
+                let loaded_image = image::load_from_memory(&image_bytes).unwrap();
+                let glyph_image = ColorImage::from_rgba_unmultiplied(
+                    [loaded_image.width() as _, loaded_image.height() as _],
+                    loaded_image.to_rgba8().as_flat_samples().as_slice(),
+                );
+
+                for y in 0..glyph_height {
+                    for x in 0..glyph_width {
+                        let px = glyph_pos.0 + x as usize;
+                        let py = glyph_pos.1 + y as usize;
+                        image[(px, py)] = glyph_image[(x, y)];
+                    }
+                }
+            }
+        }
+
+        let offset_in_pixels = vec2(
+            0.0,
+            scale_in_pixels - metrics.actual_bounding_box_ascent() as f32,
+        );
+        let offset = offset_in_pixels / pixels_per_point + y_offset * Vec2::Y;
+
+        UvRect {
+            offset,
+            size: vec2(glyph_width as f32, glyph_height as f32) / pixels_per_point,
+            min: [glyph_pos.0 as u16, glyph_pos.1 as u16],
+            max: [
+                (glyph_pos.0 + glyph_width) as u16,
+                (glyph_pos.1 + glyph_height) as u16,
+            ],
+        }
+    };
+
+    let advance_width_in_points = metrics.width() as f32 / pixels_per_point;
 
     GlyphInfo {
         id: glyph_id,
