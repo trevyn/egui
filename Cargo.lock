@@ -1289,13 +1289,17 @@ dependencies = [
  "ab_glyph",
  "ahash 0.7.6",
  "atomic_refcell",
+ "base64",
  "bytemuck",
  "cint",
  "criterion",
  "emath",
+ "image",
  "nohash-hasher",
  "parking_lot 0.12.0",
  "serde",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
