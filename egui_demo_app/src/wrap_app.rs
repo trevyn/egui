@@ -96,6 +96,7 @@ pub struct WrapApp {
 
 impl WrapApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        #[allow(unused_mut)]
         let mut slf = Self {
             state: State::default(),
             custom3d: crate::apps::Custom3d::new(&cc.gl),
@@ -127,6 +128,12 @@ impl WrapApp {
             if let Some(state) = eframe::get_value(storage, eframe::APP_KEY) {
                 slf.state = state;
             }
+        }
+
+        if cc.integration_info.prefer_dark_mode == Some(false) {
+            cc.egui_ctx.set_visuals(egui::Visuals::light()); // use light mode if explicitly asked for
+        } else {
+            cc.egui_ctx.set_visuals(egui::Visuals::dark()); // use dark mode if there is no preference, or the preference is dark mode
         }
 
         slf
