@@ -37,7 +37,7 @@ extra_debug_asserts = ["epaint/extra_debug_asserts"]
 # Always enable additional checks.
 extra_asserts = ["epaint/extra_asserts"]
 
-# Add compatibility with https://github.com/kvark/mint
+# Add compatability with https://github.com/kvark/mint
 mint = ["epaint/mint"]
 
 # Allow using native fonts (currently web-only)

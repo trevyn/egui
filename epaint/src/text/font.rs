@@ -176,7 +176,7 @@ impl FontImpl {
                 let glyph_info = allocate_glyph(
                     &mut self.atlas.lock(),
                     &ab_glyph_font,
-                    c,
+                    glyph_id,
                     self.scale_in_pixels as f32,
                     self.y_offset,
                     self.pixels_per_point,
@@ -374,15 +374,13 @@ fn invisible_char(c: char) -> bool {
 fn allocate_glyph(
     atlas: &mut TextureAtlas,
     font: &ab_glyph::FontArc,
-    c: char,
+    glyph_id: ab_glyph::GlyphId,
     scale_in_pixels: f32,
     y_offset: f32,
     pixels_per_point: f32,
 ) -> GlyphInfo {
-    use ab_glyph::{Font as _, ScaleFont};
-
-    let glyph_id = font.glyph_id(c);
     assert!(glyph_id.0 != 0);
+    use ab_glyph::{Font as _, ScaleFont};
 
     let glyph =
         glyph_id.with_scale_and_position(scale_in_pixels, ab_glyph::Point { x: 0.0, y: 0.0 });
