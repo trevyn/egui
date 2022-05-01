@@ -1,6 +1,6 @@
 use crate::{
     mutex::{Mutex, RwLock},
-    ColorImage, ImageData, TextureAtlas,
+    Color32, ColorImage, ImageData, TextureAtlas,
 };
 use ahash::AHashMap;
 use emath::{vec2, Vec2};
@@ -59,7 +59,7 @@ impl Default for GlyphInfo {
 /// The interface uses points as the unit for everything.
 pub struct FontImpl {
     name: String,
-    ab_glyph_font: ab_glyph::FontArc,
+    ab_glyph_font: Option<ab_glyph::FontArc>,
     /// Maximum character height
     scale_in_pixels: u32,
     height_in_points: f32,
@@ -75,7 +75,7 @@ impl FontImpl {
         atlas: Arc<Mutex<TextureAtlas>>,
         pixels_per_point: f32,
         name: String,
-        ab_glyph_font: ab_glyph::FontArc,
+        ab_glyph_font: Option<ab_glyph::FontArc>,
         scale_in_pixels: u32,
         y_offset_points: f32,
     ) -> FontImpl {
@@ -126,12 +126,13 @@ impl FontImpl {
     }
 
     /// An un-ordered iterator over all supported characters.
-    fn characters(&self) -> impl Iterator<Item = char> + '_ {
+    fn characters(&self) -> Option<impl Iterator<Item = char> + '_> {
         use ab_glyph::Font as _;
-        self.ab_glyph_font
-            .codepoint_ids()
-            .map(|(_, chr)| chr)
-            .filter(|&chr| !self.ignore_character(chr))
+        self.ab_glyph_font.as_ref().map(|f| {
+            f.codepoint_ids()
+                .map(|(_, chr)| chr)
+                .filter(|&chr| !self.ignore_character(chr))
+        })
     }
 
     /// `\n` will result in `None`
@@ -158,22 +159,36 @@ impl FontImpl {
         }
 
         // Add new character:
-        use ab_glyph::Font as _;
-        let glyph_id = self.ab_glyph_font.glyph_id(c);
+        if let Some(ab_glyph_font) = self.ab_glyph_font.as_ref() {
+            use ab_glyph::Font as _;
+            let glyph_id = ab_glyph_font.glyph_id(c);
 
-        if glyph_id.0 == 0 {
-            if invisible_char(c) {
-                // hack
-                let glyph_info = GlyphInfo::default();
+            if glyph_id.0 == 0 {
+                if invisible_char(c) {
+                    // hack
+                    let glyph_info = GlyphInfo::default();
+                    self.glyph_info_cache.write().insert(c, glyph_info);
+                    Some(glyph_info)
+                } else {
+                    None // unsupported character
+                }
+            } else {
+                let glyph_info = allocate_glyph(
+                    &mut self.atlas.lock(),
+                    &ab_glyph_font,
+                    c,
+                    self.scale_in_pixels as f32,
+                    self.y_offset,
+                    self.pixels_per_point,
+                );
+
                 self.glyph_info_cache.write().insert(c, glyph_info);
                 Some(glyph_info)
-            } else {
-                None // unsupported character
             }
         } else {
             let glyph_info = allocate_native_glyph(
                 &mut self.atlas.lock(),
-                &self.ab_glyph_font,
+                &self.name,
                 c,
                 self.scale_in_pixels as f32,
                 self.y_offset,
@@ -191,11 +206,15 @@ impl FontImpl {
         last_glyph_id: ab_glyph::GlyphId,
         glyph_id: ab_glyph::GlyphId,
     ) -> f32 {
-        use ab_glyph::{Font as _, ScaleFont};
-        self.ab_glyph_font
-            .as_scaled(self.scale_in_pixels as f32)
-            .kern(last_glyph_id, glyph_id)
-            / self.pixels_per_point
+        if let Some(ab_glyph_font) = self.ab_glyph_font.as_ref() {
+            use ab_glyph::{Font as _, ScaleFont};
+            ab_glyph_font
+                .as_scaled(self.scale_in_pixels as f32)
+                .kern(last_glyph_id, glyph_id)
+                / self.pixels_per_point
+        } else {
+            0.0
+        }
     }
 
     /// Height of one row of text. In points
@@ -282,7 +301,7 @@ impl Font {
         self.characters.get_or_insert_with(|| {
             let mut characters = BTreeSet::new();
             for font in &self.fonts {
-                characters.extend(font.characters());
+                font.characters().map(|c| characters.extend(c));
             }
             characters
         })
@@ -370,8 +389,8 @@ fn allocate_glyph(
 
     let uv_rect = font.outline_glyph(glyph).map(|glyph| {
         let bb = glyph.px_bounds();
-        let glyph_width = 23; //bb.width() as usize;
-        let glyph_height = 23; //bb.height() as usize;
+        let glyph_width = bb.width() as usize;
+        let glyph_height = bb.height() as usize;
         if glyph_width == 0 || glyph_height == 0 {
             UvRect::default()
         } else {
@@ -388,47 +407,15 @@ fn allocate_glyph(
                     });
                 }
                 ImageData::Color(image) => {
-                    use wasm_bindgen::JsCast;
-
-                    let document = web_sys::window().unwrap().document().unwrap();
-                    let canvas = document.create_element("canvas").unwrap();
-                    let canvas: web_sys::HtmlCanvasElement =
-                        canvas.dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
-
-                    canvas.set_width(23);
-                    canvas.set_height(23);
-
-                    let context = canvas
-                        .get_context("2d")
-                        .unwrap()
-                        .unwrap()
-                        .dyn_into::<web_sys::CanvasRenderingContext2d>()
-                        .unwrap();
-
-                    context.set_font("30px system-ui");
-
-                    context.set_fill_style(&"white".into());
-
-                    context
-                        .fill_text(c.to_string().as_str(), 0.0, 20.0)
-                        .unwrap();
-
-                    let data_url = canvas.to_data_url_with_type("image/png").unwrap();
-                    let data = data_url.strip_prefix("data:image/png;base64,").unwrap();
-                    let image_bytes = base64::decode(data).unwrap();
-                    let loaded_image = image::load_from_memory(&image_bytes).unwrap();
-                    let glyph_image = ColorImage::from_rgba_unmultiplied(
-                        [loaded_image.width() as _, loaded_image.height() as _],
-                        loaded_image.to_rgba8().as_flat_samples().as_slice(),
-                    );
-
-                    for y in 0..23 {
-                        for x in 0..23 {
+                    glyph.draw(|x, y, v| {
+                        if v > 0.0 {
                             let px = glyph_pos.0 + x as usize;
                             let py = glyph_pos.1 + y as usize;
-                            image[(px, py)] = glyph_image[(x, y)];
+                            let gamma = 1.0;
+                            let a = crate::image::fast_round(v.powf(gamma / 2.2) * 255.0);
+                            image[(px, py)] = Color32::from_rgba_premultiplied(a, a, a, a);
                         }
-                    }
+                    });
                 }
             }
 
@@ -459,13 +446,12 @@ fn allocate_glyph(
 
 fn allocate_native_glyph(
     atlas: &mut TextureAtlas,
-    font: &ab_glyph::FontArc,
+    name: &String,
     c: char,
     scale_in_pixels: f32,
     y_offset: f32,
     pixels_per_point: f32,
 ) -> GlyphInfo {
-    use ab_glyph::{Font as _, ScaleFont};
     use wasm_bindgen::JsCast;
 
     let document = web_sys::window().unwrap().document().unwrap();
@@ -480,17 +466,19 @@ fn allocate_native_glyph(
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .unwrap();
 
-    context.set_font(format!("{}px system-ui", scale_in_pixels).as_str());
+    context.set_font(format!("100 {}px {}", scale_in_pixels, name).as_str());
 
     let metrics = context.measure_text(c.to_string().as_str()).unwrap();
 
-    let glyph_width =
-        (metrics.actual_bounding_box_left() + metrics.actual_bounding_box_right() + 1.0).ceil()
-            as usize;
-    let glyph_height = (metrics.actual_bounding_box_ascent().abs()
-        + metrics.actual_bounding_box_descent().abs()
-        + 1.0)
-        .ceil() as usize;
+    let glyph_width = (((metrics.actual_bounding_box_left().abs()
+        + metrics.actual_bounding_box_right().abs()) as f32)
+        .ceil()
+        + 1.0) as usize;
+    let glyph_height = ((metrics.actual_bounding_box_ascent().abs() as f32
+        + metrics.actual_bounding_box_descent().abs() as f32
+        + (scale_in_pixels / 4.0)) // Many emoji seem to report incorrect descent metrics, this prevents them from getting cut off
+        .ceil()
+        + 1.0) as usize;
 
     canvas.set_width(glyph_width as u32);
     canvas.set_height(glyph_height as u32);
@@ -502,11 +490,8 @@ fn allocate_native_glyph(
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .unwrap();
 
-    context.set_font(format!("{}px system-ui", scale_in_pixels).as_str());
+    context.set_font(format!("100 {}px {}", scale_in_pixels, name).as_str());
     context.set_fill_style(&"white".into());
-
-    let glyph_id = font.glyph_id(c);
-    assert!(glyph_id.0 != 0);
 
     let uv_rect = if glyph_width == 0 || glyph_height == 0 {
         UvRect::default()
@@ -563,7 +548,7 @@ fn allocate_native_glyph(
     let advance_width_in_points = metrics.width() as f32 / pixels_per_point;
 
     GlyphInfo {
-        id: glyph_id,
+        id: ab_glyph::GlyphId(0),
         advance_width: advance_width_in_points,
         uv_rect,
     }

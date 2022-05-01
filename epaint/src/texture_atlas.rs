@@ -49,7 +49,7 @@ impl TextureAtlas {
         assert!(size[0] >= 1024, "Tiny texture atlas");
         Self {
             // image: ImageData::Font(FontImage::new(size)),
-            image: ImageData::Color(ColorImage::new(size, Color32::RED)),
+            image: ImageData::Color(ColorImage::new(size, Color32::TRANSPARENT)),
             dirty: Rectu::EVERYTHING,
             cursor: (0, 0),
             row_height: 0,

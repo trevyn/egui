@@ -102,6 +102,26 @@ impl WrapApp {
             dropped_files: Default::default(),
         };
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.families.insert(
+                egui::FontFamily::Name("system-ui".into()),
+                vec!["system-ui".into()],
+            );
+            fonts
+                .families
+                .insert(egui::FontFamily::Name("serif".into()), vec!["serif".into()]);
+            fonts
+                .families
+                .insert(egui::FontFamily::Monospace, vec!["monospace".into()]);
+            fonts
+                .families
+                .insert(egui::FontFamily::Proportional, vec!["system-ui".into()]);
+
+            cc.egui_ctx.set_fonts(fonts);
+        }
+
         #[cfg(feature = "persistence")]
         if let Some(storage) = cc.storage {
             if let Some(state) = eframe::get_value(storage, eframe::APP_KEY) {

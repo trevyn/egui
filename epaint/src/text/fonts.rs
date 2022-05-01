@@ -700,11 +700,12 @@ impl FontImplCache {
     }
 
     pub fn font_impl(&mut self, scale_in_pixels: u32, font_name: &str) -> Arc<FontImpl> {
-        let (tweak, ab_glyph_font) = self
-            .ab_glyph_fonts
-            .get(font_name)
-            .unwrap_or_else(|| panic!("No font data found for {:?}", font_name))
-            .clone();
+        let (tweak, ab_glyph_font) = if let Some(result) = self.ab_glyph_fonts.get(font_name) {
+            let (tweak, ab_glyph_font) = result.clone();
+            (tweak, Some(ab_glyph_font))
+        } else {
+            (FontTweak::default(), None)
+        };
 
         let scale_in_pixels = (scale_in_pixels as f32 * tweak.scale).round() as u32;
 

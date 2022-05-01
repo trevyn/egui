@@ -297,7 +297,7 @@ impl From<FontImage> for ImageData {
     }
 }
 
-fn fast_round(r: f32) -> u8 {
+pub(crate) fn fast_round(r: f32) -> u8 {
     (r + 0.5).floor() as _ // rust does a saturating cast since 1.45
 }
 
