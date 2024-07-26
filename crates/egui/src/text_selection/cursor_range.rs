@@ -2,7 +2,7 @@ use epaint::{text::cursor::*, Galley};
 
 use crate::{os::OperatingSystem, Event, Id, Key, Modifiers};
 
-use super::text_cursor_state::{ccursor_next_word, ccursor_previous_word, slice_char_range};
+use super::text_cursor_state::{slice_char_range, SelectionBoundary};
 
 /// A selected text range (could be a range of length zero).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -69,6 +69,21 @@ impl CursorRange {
         let [other_min, other_max] = other.sorted_cursors();
         self_min.ccursor.index <= other_min.ccursor.index
             && other_max.ccursor.index <= self_max.ccursor.index
+    }
+
+    /// Extend the selection to include another range
+    pub fn extend(&self, primary: &Self) -> Self {
+        if primary.as_sorted_char_range().start < self.as_sorted_char_range().start {
+            Self {
+                primary: primary.sorted_cursors()[0],
+                secondary: self.sorted_cursors()[1],
+            }
+        } else {
+            Self {
+                primary: primary.sorted_cursors()[1],
+                secondary: self.sorted_cursors()[0],
+            }
+        }
     }
 
     /// If there is a selection, None is returned.
@@ -241,6 +256,13 @@ impl CCursorRange {
         }
     }
 
+    pub fn cursor_range(&self, galley: &Galley) -> CursorRange {
+        CursorRange {
+            primary: galley.from_ccursor(self.primary),
+            secondary: galley.from_ccursor(self.secondary),
+        }
+    }
+
     #[inline]
     pub fn is_sorted(&self) -> bool {
         let p = self.primary;
@@ -322,7 +344,9 @@ fn move_single_cursor(
         Key::ArrowLeft => {
             if modifiers.alt || modifiers.ctrl {
                 // alt on mac, ctrl on windows
-                *cursor = galley.from_ccursor(ccursor_previous_word(galley, cursor.ccursor));
+                *cursor = galley.from_ccursor(
+                    SelectionBoundary::Word.ccursor_previous_bounded(galley, cursor.ccursor),
+                );
             } else if modifiers.mac_cmd {
                 *cursor = galley.cursor_begin_of_row(cursor);
             } else {
@@ -332,7 +356,9 @@ fn move_single_cursor(
         Key::ArrowRight => {
             if modifiers.alt || modifiers.ctrl {
                 // alt on mac, ctrl on windows
-                *cursor = galley.from_ccursor(ccursor_next_word(galley, cursor.ccursor));
+                *cursor = galley.from_ccursor(
+                    SelectionBoundary::Word.ccursor_next_bounded(galley, cursor.ccursor),
+                );
             } else if modifiers.mac_cmd {
                 *cursor = galley.cursor_end_of_row(cursor);
             } else {

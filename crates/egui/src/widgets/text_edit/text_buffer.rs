@@ -10,8 +10,7 @@ use epaint::{
 
 use crate::text_selection::{
     text_cursor_state::{
-        byte_index_from_char_index, ccursor_next_word, ccursor_previous_word, find_line_start,
-        slice_char_range,
+        byte_index_from_char_index, find_line_start, slice_char_range, SelectionBoundary,
     },
     CursorRange,
 };
@@ -139,12 +138,13 @@ pub trait TextBuffer {
     }
 
     fn delete_previous_word(&mut self, max_ccursor: CCursor) -> CCursor {
-        let min_ccursor = ccursor_previous_word(self.as_str(), max_ccursor);
+        let min_ccursor =
+            SelectionBoundary::Word.ccursor_previous_bounded(self.as_str(), max_ccursor);
         self.delete_selected_ccursor_range([min_ccursor, max_ccursor])
     }
 
     fn delete_next_word(&mut self, min_ccursor: CCursor) -> CCursor {
-        let max_ccursor = ccursor_next_word(self.as_str(), min_ccursor);
+        let max_ccursor = SelectionBoundary::Word.ccursor_next_bounded(self.as_str(), min_ccursor);
         self.delete_selected_ccursor_range([min_ccursor, max_ccursor])
     }
 

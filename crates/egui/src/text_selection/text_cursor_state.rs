@@ -6,6 +6,15 @@ use crate::*;
 
 use super::{CCursorRange, CursorRange};
 
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum SelectionBoundary {
+    #[default]
+    Character,
+    Word,
+    Line,
+}
+
 /// The state of a text cursor selection.
 ///
 /// Used for [`crate::TextEdit`] and [`crate::Label`].
@@ -18,6 +27,10 @@ pub struct TextCursorState {
     /// This is what is easiest to work with when editing text,
     /// so users are more likely to read/write this.
     ccursor_range: Option<CCursorRange>,
+
+    initial_cursor_range: Option<CursorRange>,
+
+    selection_boundary: SelectionBoundary,
 }
 
 impl From<CursorRange> for TextCursorState {
@@ -28,6 +41,7 @@ impl From<CursorRange> for TextCursorState {
                 primary: cursor_range.primary.ccursor,
                 secondary: cursor_range.secondary.ccursor,
             }),
+            ..Default::default()
         }
     }
 }
@@ -37,6 +51,7 @@ impl From<CCursorRange> for TextCursorState {
         Self {
             cursor_range: None,
             ccursor_range: Some(ccursor_range),
+            ..Default::default()
         }
     }
 }
@@ -104,22 +119,17 @@ impl TextCursorState {
         let text = galley.text();
 
         if response.double_clicked() {
-            // Select word:
-            let ccursor_range = select_word_at(text, cursor_at_pointer.ccursor);
-            self.set_range(Some(CursorRange {
-                primary: galley.from_ccursor(ccursor_range.primary),
-                secondary: galley.from_ccursor(ccursor_range.secondary),
-            }));
-            true
-        } else if response.triple_clicked() {
-            // Select line:
-            let ccursor_range = select_line_at(text, cursor_at_pointer.ccursor);
-            self.set_range(Some(CursorRange {
-                primary: galley.from_ccursor(ccursor_range.primary),
-                secondary: galley.from_ccursor(ccursor_range.secondary),
-            }));
-            true
-        } else if response.sense.drag {
+            self.selection_boundary = SelectionBoundary::Line;
+        } else if response.clicked() {
+            self.selection_boundary = SelectionBoundary::Word;
+        } else if ui.input(|i| {
+            !i.pointer.any_down()
+                && i.pointer.time_since_last_click() as f64 > input_state::MAX_DOUBLE_CLICK_DELAY
+        }) {
+            self.selection_boundary = SelectionBoundary::Character;
+        }
+
+        if response.sense.drag {
             if response.hovered() && ui.input(|i| i.pointer.any_pressed()) {
                 // The start of a drag (or a click).
                 if ui.input(|i| i.modifiers.shift) {
@@ -130,14 +140,34 @@ impl TextCursorState {
                         self.set_range(Some(CursorRange::one(cursor_at_pointer)));
                     }
                 } else {
-                    self.set_range(Some(CursorRange::one(cursor_at_pointer)));
+                    self.initial_cursor_range = Some(match self.selection_boundary {
+                        SelectionBoundary::Character => CursorRange::one(cursor_at_pointer),
+                        boundary => boundary
+                            .select_bounded_at(text, cursor_at_pointer.ccursor)
+                            .cursor_range(galley),
+                    });
+                    self.set_range(self.initial_cursor_range);
                 }
                 true
             } else if is_being_dragged {
-                // Drag to select text:
-                if let Some(mut cursor_range) = self.range(galley) {
-                    cursor_range.primary = cursor_at_pointer;
-                    self.set_range(Some(cursor_range));
+                match self.selection_boundary {
+                    SelectionBoundary::Character => {
+                        if let Some(mut cursor_range) = self.range(galley) {
+                            cursor_range.primary = cursor_at_pointer;
+                            self.set_range(Some(cursor_range));
+                        }
+                    }
+                    boundary => {
+                        if let Some(initial_cursor_range) = self.initial_cursor_range {
+                            self.set_range(Some(
+                                initial_cursor_range.extend(
+                                    &boundary
+                                        .select_bounded_at(text, cursor_at_pointer.ccursor)
+                                        .cursor_range(galley),
+                                ),
+                            ));
+                        }
+                    }
                 }
                 true
             } else {
@@ -149,150 +179,89 @@ impl TextCursorState {
     }
 }
 
-fn select_word_at(text: &str, ccursor: CCursor) -> CCursorRange {
-    if ccursor.index == 0 {
-        CCursorRange::two(ccursor, ccursor_next_word(text, ccursor))
-    } else {
-        let it = text.chars();
-        let mut it = it.skip(ccursor.index - 1);
-        if let Some(char_before_cursor) = it.next() {
-            if let Some(char_after_cursor) = it.next() {
-                if is_word_char(char_before_cursor) && is_word_char(char_after_cursor) {
-                    let min = ccursor_previous_word(text, ccursor + 1);
-                    let max = ccursor_next_word(text, min);
-                    CCursorRange::two(min, max)
-                } else if is_word_char(char_before_cursor) {
-                    let min = ccursor_previous_word(text, ccursor);
-                    let max = ccursor_next_word(text, min);
-                    CCursorRange::two(min, max)
-                } else if is_word_char(char_after_cursor) {
-                    let max = ccursor_next_word(text, ccursor);
-                    CCursorRange::two(ccursor, max)
+impl SelectionBoundary {
+    fn select_bounded_at(&self, text: &str, ccursor: CCursor) -> CCursorRange {
+        if ccursor.index == 0 {
+            CCursorRange::two(ccursor, self.ccursor_next_bounded(text, ccursor))
+        } else {
+            let it = text.chars();
+            let mut it = it.skip(ccursor.index - 1);
+            if let Some(char_before_cursor) = it.next() {
+                if let Some(char_after_cursor) = it.next() {
+                    if !self.is_boundary_char(char_before_cursor)
+                        && !self.is_boundary_char(char_after_cursor)
+                    {
+                        let min = self.ccursor_previous_bounded(text, ccursor + 1);
+                        let max = self.ccursor_next_bounded(text, min);
+                        CCursorRange::two(min, max)
+                    } else if !self.is_boundary_char(char_before_cursor) {
+                        let min = self.ccursor_previous_bounded(text, ccursor);
+                        let max = self.ccursor_next_bounded(text, min);
+                        CCursorRange::two(min, max)
+                    } else if !self.is_boundary_char(char_after_cursor) {
+                        let max = self.ccursor_next_bounded(text, ccursor);
+                        CCursorRange::two(ccursor, max)
+                    } else {
+                        let min = self.ccursor_previous_bounded(text, ccursor);
+                        let max = self.ccursor_next_bounded(text, ccursor);
+                        CCursorRange::two(min, max)
+                    }
                 } else {
-                    let min = ccursor_previous_word(text, ccursor);
-                    let max = ccursor_next_word(text, ccursor);
-                    CCursorRange::two(min, max)
+                    let min = self.ccursor_previous_bounded(text, ccursor);
+                    CCursorRange::two(min, ccursor)
                 }
             } else {
-                let min = ccursor_previous_word(text, ccursor);
-                CCursorRange::two(min, ccursor)
+                let max = self.ccursor_next_bounded(text, ccursor);
+                CCursorRange::two(ccursor, max)
             }
-        } else {
-            let max = ccursor_next_word(text, ccursor);
-            CCursorRange::two(ccursor, max)
         }
     }
-}
 
-fn select_line_at(text: &str, ccursor: CCursor) -> CCursorRange {
-    if ccursor.index == 0 {
-        CCursorRange::two(ccursor, ccursor_next_line(text, ccursor))
-    } else {
-        let it = text.chars();
-        let mut it = it.skip(ccursor.index - 1);
-        if let Some(char_before_cursor) = it.next() {
-            if let Some(char_after_cursor) = it.next() {
-                if (!is_linebreak(char_before_cursor)) && (!is_linebreak(char_after_cursor)) {
-                    let min = ccursor_previous_line(text, ccursor + 1);
-                    let max = ccursor_next_line(text, min);
-                    CCursorRange::two(min, max)
-                } else if !is_linebreak(char_before_cursor) {
-                    let min = ccursor_previous_line(text, ccursor);
-                    let max = ccursor_next_line(text, min);
-                    CCursorRange::two(min, max)
-                } else if !is_linebreak(char_after_cursor) {
-                    let max = ccursor_next_line(text, ccursor);
-                    CCursorRange::two(ccursor, max)
-                } else {
-                    let min = ccursor_previous_line(text, ccursor);
-                    let max = ccursor_next_line(text, ccursor);
-                    CCursorRange::two(min, max)
-                }
-            } else {
-                let min = ccursor_previous_line(text, ccursor);
-                CCursorRange::two(min, ccursor)
-            }
-        } else {
-            let max = ccursor_next_line(text, ccursor);
-            CCursorRange::two(ccursor, max)
+    pub fn ccursor_next_bounded(&self, text: &str, ccursor: CCursor) -> CCursor {
+        CCursor {
+            index: self.next_boundary_char_index(text.chars(), ccursor.index),
+            prefer_next_row: false,
         }
     }
-}
 
-pub fn ccursor_next_word(text: &str, ccursor: CCursor) -> CCursor {
-    CCursor {
-        index: next_word_boundary_char_index(text.chars(), ccursor.index),
-        prefer_next_row: false,
+    pub fn ccursor_previous_bounded(&self, text: &str, ccursor: CCursor) -> CCursor {
+        let num_chars = text.chars().count();
+        CCursor {
+            index: num_chars
+                - self.next_boundary_char_index(text.chars().rev(), num_chars - ccursor.index),
+            prefer_next_row: true,
+        }
     }
-}
 
-fn ccursor_next_line(text: &str, ccursor: CCursor) -> CCursor {
-    CCursor {
-        index: next_line_boundary_char_index(text.chars(), ccursor.index),
-        prefer_next_row: false,
-    }
-}
-
-pub fn ccursor_previous_word(text: &str, ccursor: CCursor) -> CCursor {
-    let num_chars = text.chars().count();
-    CCursor {
-        index: num_chars
-            - next_word_boundary_char_index(text.chars().rev(), num_chars - ccursor.index),
-        prefer_next_row: true,
-    }
-}
-
-fn ccursor_previous_line(text: &str, ccursor: CCursor) -> CCursor {
-    let num_chars = text.chars().count();
-    CCursor {
-        index: num_chars
-            - next_line_boundary_char_index(text.chars().rev(), num_chars - ccursor.index),
-        prefer_next_row: true,
-    }
-}
-
-fn next_word_boundary_char_index(it: impl Iterator<Item = char>, mut index: usize) -> usize {
-    let mut it = it.skip(index);
-    if let Some(_first) = it.next() {
-        index += 1;
-
-        if let Some(second) = it.next() {
+    fn next_boundary_char_index(&self, it: impl Iterator<Item = char>, mut index: usize) -> usize {
+        let mut it = it.skip(index);
+        if let Some(_first) = it.next() {
             index += 1;
-            for next in it {
-                if is_word_char(next) != is_word_char(second) {
-                    break;
-                }
+
+            if let Some(second) = it.next() {
                 index += 1;
+                for next in it {
+                    if self.is_boundary_char(next) != self.is_boundary_char(second) {
+                        break;
+                    }
+                    index += 1;
+                }
             }
         }
+        index
     }
-    index
-}
 
-fn next_line_boundary_char_index(it: impl Iterator<Item = char>, mut index: usize) -> usize {
-    let mut it = it.skip(index);
-    if let Some(_first) = it.next() {
-        index += 1;
-
-        if let Some(second) = it.next() {
-            index += 1;
-            for next in it {
-                if is_linebreak(next) != is_linebreak(second) {
-                    break;
-                }
-                index += 1;
-            }
+    fn is_boundary_char(&self, c: char) -> bool {
+        match self {
+            Self::Character => unreachable!(),
+            Self::Word => !is_word_char(c),
+            Self::Line => c == '\r' || c == '\n',
         }
     }
-    index
 }
 
 pub fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
-}
-
-fn is_linebreak(c: char) -> bool {
-    c == '\r' || c == '\n'
 }
 
 /// Accepts and returns character offset (NOT byte offset!).
